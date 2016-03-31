@@ -17,7 +17,7 @@
 'use strict';
 
 const request = require('request');
-const encrypt = require('./encrypt').encrypt;
+const encrypt = require('./encrypt');
 
 const GCM_URL = 'https://android.googleapis.com/gcm/send';
 const TEMP_GCM_URL = 'https://gcm-http.googleapis.com/gcm';
@@ -35,26 +35,31 @@ function ub64(buffer) {
 
 /**
  * Sends a message using the Web Push protocol
- * @param  {String}   message      The message to send
- * @param  {Object}   subscription The subscription details for the client we
- *                                 are sending to
- * @param  {String}   authToken    Optional token to be used in the
- *                                 `Authentication` header if the endpoint
- *                                 requires it.
+ * @param  {String}   message       The message to send
+ * @param  {Object}   subscription  The subscription details for the client we
+ *                                  are sending to
+ * @param  {String}   authToken     Optional token to be used in the
+ *                                  `Authentication` header if the endpoint
+ *                                  requires it.
+ * @param {Number}    paddingLength The number of bytes of padding to add to the
+ *                                  message before encrypting it.
  * @return {Promise} A promise that resolves if the push was sent successfully
  *                   with status and body.
  */
-function sendWebPush(message, subscription, authToken) {
+function sendWebPush(message, subscription, authToken, paddingLength) {
   // If the endpoint is GCM then we temporarily need to rewrite it, as not all
   // GCM servers support the Web Push protocol. This should go away in the
   // future.
   const endpoint = subscription.endpoint.replace(GCM_URL, TEMP_GCM_URL);
+  const headers = {};
+  let body;
 
-  const payload = encrypt(message, subscription);
-  const headers = {
-    'Encryption': `salt=${ub64(payload.salt)}`,
-    'Crypto-Key': `dh=${ub64(payload.serverPublicKey)}`
-  };
+  if (message && typeof message === 'string' && message.length > 0) {
+    const payload = encrypt(message, subscription, paddingLength);
+    headers.Encryption = `salt=${ub64(payload.salt)}`;
+    headers['Crypto-Key'] = `dh=${ub64(payload.serverPublicKey)}`;
+    body = payload.ciphertext;
+  }
 
   if (authToken) {
     headers.Authorization = `key=${authToken}`;
@@ -62,7 +67,7 @@ function sendWebPush(message, subscription, authToken) {
 
   return new Promise(function(resolve, reject) {
     request.post(endpoint, {
-      body: payload.ciphertext,
+      body: body,
       headers: headers
     }, function(error, response, body) {
       if (error) {
